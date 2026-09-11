@@ -8,7 +8,7 @@
     <style>
         :root { --bg: #f4f4f5; --card: #ffffff; --text: #18181b; --accent: #2563eb; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; }
-        h1 { font-size: 1.5rem; text-align: center; color: var(--text); }
+        h1 { font-size: 1.5rem; text-align: center; color: var(--text); margin-bottom: 24px; }
         #schedule-container { max-width: 600px; margin: 0 auto; }
         
         .day-card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
@@ -31,45 +31,19 @@
     <div id="schedule-container">Laen andmeid...</div>
 
     <script>
-        // The exact source file on the school's server
-        const targetUrl = 'https://tamme.tartu.ee/tunniplaan/cl_7a.html';
-
-        // Multi-proxy fallback to bypass Tartu municipal CORS blocks
-        const proxies = [
-            url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-            url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-            url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
-        ];
-
-        async function fetchWithFallback(url) {
-            let lastError;
-            for (const proxyGen of proxies) {
-                try {
-                    const proxyUrl = proxyGen(url);
-                    const res = await fetch(proxyUrl);
-                    if (!res.ok) throw new Error(`HTTP status ${res.status}`);
-                    
-                    if (proxyUrl.includes('allorigins')) {
-                        const json = await res.json();
-                        if (json.contents) return json.contents;
-                    } else {
-                        const text = await res.text();
-                        if (text && text.trim().length > 0) return text;
-                    }
-                } catch (err) {
-                    lastError = err;
-                    console.warn(`Proxy failed: ${proxyGen(url)}`, err);
-                }
-            }
-            throw new Error(`Kõik proxy'd ebaõnnestusid. Viimane viga: ${lastError?.message}`);
-        }
+        // Points to the static file downloaded by the GitHub Action
+        const targetUrl = './schedule.html';
 
         async function fetchAndParse() {
             const container = document.getElementById('schedule-container');
             try {
-                const rawHtml = await fetchWithFallback(targetUrl);
+                // Fetch the locally hosted schedule file
+                const response = await fetch(targetUrl);
+                if (!response.ok) throw new Error(`HTTP viga: ${response.status} - Kas GitHub Action salvestas faili?`);
                 
-                // Parse the raw HTML text into a readable DOM tree
+                const rawHtml = await response.text();
+                
+                // Parse the raw HTML into a readable DOM tree
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(rawHtml, 'text/html');
                 
@@ -78,7 +52,7 @@
                 const scheduleTable = tables.find(t => t.querySelectorAll('tr').length > 2) || tables[0];
 
                 if (!scheduleTable) {
-                    throw new Error("Ei leidnud lehelt tunniplaani tabelit.");
+                    throw new Error("Ei leidnud failist tunniplaani tabelit.");
                 }
 
                 const rows = Array.from(scheduleTable.querySelectorAll('tr'));
@@ -112,7 +86,7 @@
                 }
 
                 if (scheduleData.length === 0) {
-                    throw new Error("Tabel leiti, aga see tundub olevat tühi.");
+                    throw new Error("Tabel leiti, aga see on tühi.");
                 }
 
                 renderSchedule(scheduleData);
@@ -157,10 +131,10 @@
         // Initialize fetch
         fetchAndParse();
 
-        // Register Service Worker for PWA installation capability
+        // Register Service Worker for PWA capability
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js').catch(err => {
-                console.warn("Service worker registration failed (normal for local dev):", err);
+                console.warn("Service worker registration failed:", err);
             });
         }
     </script>
