@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="et">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tamme Tunniplaan</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        :root { --bg: #f4f4f5; --card: #ffffff; --text: #18181b; --accent: #2563eb; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; }
+        h1 { font-size: 1.5rem; text-align: center; }
+        .day-card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .day-title { font-weight: bold; font-size: 1.2rem; margin-bottom: 12px; border-bottom: 2px solid var(--bg); padding-bottom: 8px; color: var(--accent); }
+        .lesson { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--bg); }
+        .lesson:last-child { border-bottom: none; }
+        .lesson-time { font-weight: 600; font-size: 0.9rem; color: #52525b; min-width: 45px; }
+        .lesson-details { display: flex; flex-direction: column; }
+        .subject { font-weight: bold; }
+        .meta { font-size: 0.8rem; color: #71717a; }
+    </style>
+</head>
+<body>
+    <h1>6.a Tunniplaan</h1>
+    <div id="schedule-container">Laeb andmeid...</div>
+
+    <script>
+        // Replace with the exact sub-URL where the 6.a HTML table lives
+        const targetUrl = 'https://tamme.tartu.ee/path/to/6a_schedule.html'; 
+        const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+
+        async function fetchAndParse() {
+            try {
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+                
+                // Parse the raw HTML string into a virtual DOM
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(data.contents, 'text/html');
+                
+                // Locate the main table
+                const tableRows = doc.querySelectorAll('table tr');
+                let scheduleData = [];
+
+                // Assuming standard aSc output: Row 0 is times, Rows 1-5 are Days (Mon-Fri)
+                const timeHeaders = Array.from(tableRows[0].querySelectorAll('td, th')).map(cell => cell.innerText.trim());
+
+                for (let i = 1; i < tableRows.length; i++) {
+                    const cells = Array.from(tableRows[i].querySelectorAll('td, th'));
+                    if (cells.length < 2) continue; // Skip empty rows
+                    
+                    const dayName = cells[0].innerText.trim();
+                    let lessons = [];
+
+                    for (let j = 1; j < cells.length; j++) {
+                        const lessonContent = cells[j].innerText.trim();
+                        if (lessonContent) {
+                            lessons.push({
+                                time: timeHeaders[j] || `${j}. tund`,
+                                content: lessonContent
+                            });
+                        }
+                    }
+                    
+                    scheduleData.push({ day: dayName, lessons });
+                }
+
+                renderSchedule(scheduleData);
+            } catch (error) {
+                document.getElementById('schedule-container').innerText = "Viga andmete laadimisel.";
+                console.error(error);
+            }
+        }
+
+        function renderSchedule(scheduleData) {
+            const container = document.getElementById('schedule-container');
+            container.innerHTML = ''; // Clear loading text
+
+            scheduleData.forEach(day => {
+                const card = document.createElement('div');
+                card.className = 'day-card';
+                
+                let lessonsHtml = day.lessons.map(l => `
+                    <div class="lesson">
+                        <div class="lesson-time">${l.time}</div>
+                        <div class="lesson-details">
+                            <span class="subject">${l.content.split('\n')[0]}</span>
+                            <span class="meta">${l.content.split('\n').slice(1).join(' | ')}</span>
+                        </div>
+                    </div>
+                `).join('');
+
+                card.innerHTML = `<div class="day-title">${day.day}</div>${lessonsHtml}`;
+                container.appendChild(card);
+            });
+        }
+
+        fetchAndParse();
+
+        // Register Service Worker for PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+    </script>
+</body>
+</html>
