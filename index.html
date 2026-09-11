@@ -39,7 +39,35 @@
             "esmaspäev": "E", "teisipäev": "T", "kolmapäev": "K", "neljapäev": "N", "reede": "R"
         };
 
-        // Forces every tag (spans, divs, br) into a newline so text doesn't merge
+        const subjectMapping = {
+            "keh": "Kehaline kasvatus",
+            "ik": "Inglise keel",
+            "mat": "Matemaatika",
+            "bio": "Bioloogia",
+            "ek": "Eesti keel",
+            "loodus": "Loodusõpetus",
+            "kirj": "Kirjandus",
+            "aja": "Ajalugu",
+            "inõp": "Inimesõpetus",
+            "geog": "Geograafia",
+            "vene": "Vene keel",
+            "muus": "Muusika",
+            "kunst": "Kunst",
+            "füüs": "Füüsika",
+            "keem": "Keemia",
+            "ühisk": "Ühiskonnaõpetus",
+            "kodund": "Kodundus",
+            "tehnol": "Tehnoloogia"
+        };
+
+        function formatSubject(rawSubject) {
+            if (!rawSubject) return "";
+            // Clean up abbreviation or mixed codes like "Kä/Ko/Teh" or "Inõp"
+            let cleaned = rawSubject.trim();
+            let lowerKey = cleaned.toLowerCase();
+            return subjectMapping[lowerKey] || cleaned;
+        }
+
         const extractAtomic = (html) => {
             let s = html.replace(/<[^>]+>/g, '\n');
             const txt = document.createElement('textarea');
@@ -58,7 +86,7 @@
                 clone.querySelector('table').remove();
                 let preamble = extractAtomic(clone.innerHTML);
                 time = preamble[0] || "";
-                subject = preamble[1] || "";
+                subject = formatSubject(preamble[1] || "");
                 
                 const trs = Array.from(table.querySelectorAll('tr'));
                 if (trs.length === 1) {
@@ -81,7 +109,6 @@
                 let lines = extractAtomic(td.innerHTML);
                 if (lines.length === 0) return null;
                 
-                // Identify the time signature (e.g., "9.00-9.40")
                 let timeIndex = lines.findIndex(l => /^\d{1,2}\.\d{2}/.test(l));
                 if (timeIndex !== -1) {
                     time = lines[timeIndex];
@@ -91,11 +118,10 @@
                     lines.shift();
                 }
 
-                subject = lines[0] || "";
+                subject = formatSubject(lines[0] || "");
                 lines.shift();
                 
                 if (lines.length > 0) {
-                    // Automatically splits flat text into columns if multiple teachers/rooms exist
                     if (lines.length % 2 === 0 && lines.length >= 4) {
                         for (let i = 0; i < lines.length; i += 2) {
                             groups.push([lines[i], lines[i+1]]);
@@ -145,7 +171,6 @@
                         if (td.innerText.trim() && td.innerText.trim() !== '&nbsp;') {
                             let parsedData = parseLessonCell(td);
                             if (parsedData) {
-                                // Extract the period number from the table header
                                 let pMatch = headerCells[j] ? headerCells[j].match(/\d+/) : null;
                                 let periodNum = pMatch ? pMatch[0] : j;
                                 
