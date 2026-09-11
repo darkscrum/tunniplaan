@@ -22,8 +22,8 @@
         .lesson-content { flex: 1; display: flex; flex-direction: column; gap: 6px; }
         .lesson-top { font-weight: 700; font-size: 1.05rem; color: #18181b; }
         
-        .lesson-groups { display: flex; gap: 32px; flex-wrap: wrap; }
-        .group-col { display: flex; flex-direction: column; gap: 2px; font-size: 0.95rem; color: #18181b; font-weight: 500; }
+        .lesson-groups { display: flex; gap: 32px; flex-wrap: wrap; margin-top: 4px; }
+        .group-col { display: flex; flex-direction: column; gap: 2px; font-size: 0.95rem; color: #3f3f46; font-weight: 500; }
         
         .error-box { color: #b91c1c; padding: 12px; background: #fee2e2; border-radius: 8px; font-size: 0.9rem; }
     </style>
@@ -35,55 +35,80 @@
     <script>
         const targetUrl = './schedule.html';
 
-        // Maps full day names to abbreviations for the UI (e.g., "Esmaspäev" -> "E")
         const dayMap = {
-            "esmaspäev": "E",
-            "teisipäev": "T",
-            "kolmapäev": "K",
-            "neljapäev": "N",
-            "reede": "R"
+            "esmaspäev": "E", "teisipäev": "T", "kolmapäev": "K", "neljapäev": "N", "reede": "R"
         };
 
-        // Safely extracts text from HTML while preserving <br> as logical separations
-        function extractLines(html) {
-            const temp = document.createElement('div');
-            temp.innerHTML = html.replace(/<br\s*[\/]?>/gi, '\n');
-            return temp.textContent.split('\n').map(s => s.trim()).filter(s => s !== '');
-        }
+        // Forces every tag (spans, divs, br) into a newline so text doesn't merge
+        const extractAtomic = (html) => {
+            let s = html.replace(/<[^>]+>/g, '\n');
+            const txt = document.createElement('textarea');
+            txt.innerHTML = s;
+            return txt.value.split('\n')
+                .map(l => l.replace(/\s+/g, ' ').trim())
+                .filter(l => l !== '' && l !== '&nbsp;');
+        };
 
-        // Parses a single table cell, checking for nested aSc group tables
         function parseLessonCell(td) {
             const table = td.querySelector('table');
-            let time = "";
-            let subject = "";
-            let groups = [];
+            let time = "", subject = "", groups = [];
             
             if (table) {
-                // Handle split groups (nested table)
                 let clone = td.cloneNode(true);
                 clone.querySelector('table').remove();
-                let preambleLines = extractLines(clone.innerHTML);
+                let preamble = extractAtomic(clone.innerHTML);
+                time = preamble[0] || "";
+                subject = preamble[1] || "";
                 
-                time = preambleLines[0] || "";
-                if (preambleLines.length > 1) subject = preambleLines[1];
-                
-                table.querySelectorAll('td').forEach(subTd => {
-                    let g = extractLines(subTd.innerHTML);
-                    if (g.length > 0) groups.push(g);
-                });
+                const trs = Array.from(table.querySelectorAll('tr'));
+                if (trs.length === 1) {
+                    trs[0].querySelectorAll('td').forEach(subTd => {
+                        let lines = extractAtomic(subTd.innerHTML);
+                        if (lines.length > 0) groups.push(lines);
+                    });
+                } else if (trs.length > 1) {
+                    let colCount = trs[0].querySelectorAll('td').length;
+                    for (let c = 0; c < colCount; c++) {
+                        let colLines = [];
+                        trs.forEach(tr => {
+                            let cell = tr.querySelectorAll('td')[c];
+                            if (cell) colLines.push(...extractAtomic(cell.innerHTML));
+                        });
+                        if (colLines.length > 0) groups.push(colLines);
+                    }
+                }
             } else {
-                // Handle single group (flat text)
-                let lines = extractLines(td.innerHTML);
+                let lines = extractAtomic(td.innerHTML);
                 if (lines.length === 0) return null;
                 
-                time = lines[0] || "";
-                if (lines.length > 1) subject = lines[1];
+                // Identify the time signature (e.g., "9.00-9.40")
+                let timeIndex = lines.findIndex(l => /^\d{1,2}\.\d{2}/.test(l));
+                if (timeIndex !== -1) {
+                    time = lines[timeIndex];
+                    lines.splice(timeIndex, 1);
+                } else {
+                    time = lines[0] || "";
+                    lines.shift();
+                }
+
+                subject = lines[0] || "";
+                lines.shift();
                 
-                if (lines.length > 2) {
-                    groups.push(lines.slice(2));
+                if (lines.length > 0) {
+                    // Automatically splits flat text into columns if multiple teachers/rooms exist
+                    if (lines.length % 2 === 0 && lines.length >= 4) {
+                        for (let i = 0; i < lines.length; i += 2) {
+                            groups.push([lines[i], lines[i+1]]);
+                        }
+                    } else if (lines.length % 3 === 0 && lines.length >= 6) {
+                        for (let i = 0; i < lines.length; i += 3) {
+                            groups.push([lines[i], lines[i+1], lines[i+2]]);
+                        }
+                    } else {
+                        groups.push(lines);
+                    }
                 }
             }
-            
             return { time, subject, groups };
         }
 
@@ -120,8 +145,12 @@
                         if (td.innerText.trim() && td.innerText.trim() !== '&nbsp;') {
                             let parsedData = parseLessonCell(td);
                             if (parsedData) {
+                                // Extract the period number from the table header
+                                let pMatch = headerCells[j] ? headerCells[j].match(/\d+/) : null;
+                                let periodNum = pMatch ? pMatch[0] : j;
+                                
                                 lessons.push({
-                                    period: headerCells[j] || `${j}`,
+                                    period: periodNum,
                                     data: parsedData
                                 });
                             }
@@ -159,13 +188,9 @@
                     });
                     columnsHtml += `</div>`;
 
-                    // Ensure period number ends with a dot
-                    let periodNum = l.period;
-                    if (!periodNum.endsWith('.')) periodNum += '.';
-
                     return `
                         <div class="lesson">
-                            <div class="lesson-number">${periodNum}</div>
+                            <div class="lesson-number">${l.period}.</div>
                             <div class="lesson-content">
                                 <div class="lesson-top">${topText}</div>
                                 ${columnsHtml}
