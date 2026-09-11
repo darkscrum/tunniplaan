@@ -6,22 +6,24 @@
     <title>7.a Tunniplaan</title>
     <link rel="manifest" href="manifest.json">
     <style>
-        :root { --bg: #f4f4f5; --card: #ffffff; --text: #18181b; --accent: #2563eb; }
+        :root { --bg: #f4f4f5; --card: #ffffff; --text: #18181b; --accent: #2563eb; --border: #f4f4f5; }
         body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 16px; }
-        h1 { font-size: 1.5rem; text-align: center; color: var(--text); margin-bottom: 24px; }
+        h1 { font-size: 1.5rem; text-align: center; color: var(--text); margin-bottom: 24px; font-weight: 700; }
         #schedule-container { max-width: 600px; margin: 0 auto; }
         
-        .day-card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        .day-title { font-weight: bold; font-size: 1.2rem; margin-bottom: 12px; border-bottom: 2px solid var(--bg); padding-bottom: 8px; color: var(--accent); }
+        .day-card { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+        .day-title { font-weight: 800; font-size: 1.4rem; margin-bottom: 12px; border-bottom: 2px solid var(--border); padding-bottom: 12px; color: var(--accent); }
         
-        .lesson { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--bg); }
+        .lesson { display: flex; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border); }
         .lesson:last-child { border-bottom: none; padding-bottom: 0; }
         
-        .lesson-time { font-weight: 600; font-size: 0.9rem; color: #52525b; min-width: 45px; display: flex; align-items: center; }
-        .lesson-details { display: flex; flex-direction: column; justify-content: center; }
+        .lesson-number { font-weight: 700; font-size: 0.95rem; color: #52525b; min-width: 20px; padding-top: 2px; }
         
-        .subject { font-weight: bold; font-size: 1.05rem; }
-        .meta { font-size: 0.85rem; color: #71717a; margin-top: 2px; }
+        .lesson-content { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+        .lesson-top { font-weight: 700; font-size: 1.05rem; color: #18181b; }
+        
+        .lesson-groups { display: flex; gap: 32px; flex-wrap: wrap; }
+        .group-col { display: flex; flex-direction: column; gap: 2px; font-size: 0.95rem; color: #18181b; font-weight: 500; }
         
         .error-box { color: #b91c1c; padding: 12px; background: #fee2e2; border-radius: 8px; font-size: 0.9rem; }
     </style>
@@ -31,69 +33,111 @@
     <div id="schedule-container">Laen andmeid...</div>
 
     <script>
-        // Points to the static file downloaded by the GitHub Action
         const targetUrl = './schedule.html';
+
+        // Maps full day names to abbreviations for the UI (e.g., "Esmaspäev" -> "E")
+        const dayMap = {
+            "esmaspäev": "E",
+            "teisipäev": "T",
+            "kolmapäev": "K",
+            "neljapäev": "N",
+            "reede": "R"
+        };
+
+        // Safely extracts text from HTML while preserving <br> as logical separations
+        function extractLines(html) {
+            const temp = document.createElement('div');
+            temp.innerHTML = html.replace(/<br\s*[\/]?>/gi, '\n');
+            return temp.textContent.split('\n').map(s => s.trim()).filter(s => s !== '');
+        }
+
+        // Parses a single table cell, checking for nested aSc group tables
+        function parseLessonCell(td) {
+            const table = td.querySelector('table');
+            let time = "";
+            let subject = "";
+            let groups = [];
+            
+            if (table) {
+                // Handle split groups (nested table)
+                let clone = td.cloneNode(true);
+                clone.querySelector('table').remove();
+                let preambleLines = extractLines(clone.innerHTML);
+                
+                time = preambleLines[0] || "";
+                if (preambleLines.length > 1) subject = preambleLines[1];
+                
+                table.querySelectorAll('td').forEach(subTd => {
+                    let g = extractLines(subTd.innerHTML);
+                    if (g.length > 0) groups.push(g);
+                });
+            } else {
+                // Handle single group (flat text)
+                let lines = extractLines(td.innerHTML);
+                if (lines.length === 0) return null;
+                
+                time = lines[0] || "";
+                if (lines.length > 1) subject = lines[1];
+                
+                if (lines.length > 2) {
+                    groups.push(lines.slice(2));
+                }
+            }
+            
+            return { time, subject, groups };
+        }
 
         async function fetchAndParse() {
             const container = document.getElementById('schedule-container');
             try {
-                // Fetch the locally hosted schedule file
                 const response = await fetch(targetUrl);
-                if (!response.ok) throw new Error(`HTTP viga: ${response.status} - Kas GitHub Action salvestas faili?`);
+                if (!response.ok) throw new Error(`HTTP viga: ${response.status}`);
                 
                 const rawHtml = await response.text();
-                
-                // Parse the raw HTML into a readable DOM tree
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(rawHtml, 'text/html');
                 
-                // Find the main schedule table (aSc usually generates one large table)
                 const tables = Array.from(doc.querySelectorAll('table'));
                 const scheduleTable = tables.find(t => t.querySelectorAll('tr').length > 2) || tables[0];
 
-                if (!scheduleTable) {
-                    throw new Error("Ei leidnud failist tunniplaani tabelit.");
-                }
+                if (!scheduleTable) throw new Error("Ei leidnud failist tunniplaani tabelit.");
 
                 const rows = Array.from(scheduleTable.querySelectorAll('tr'));
                 let scheduleData = [];
 
-                // Extract times (horizontal axis)
                 const headerCells = Array.from(rows[0].querySelectorAll('td, th')).map(c => c.innerText.trim());
 
-                // Loop through days (vertical axis)
                 for (let i = 1; i < rows.length; i++) {
                     const cells = Array.from(rows[i].querySelectorAll('td, th'));
-                    if (cells.length < 2) continue; // Skip malformed/spacer rows
+                    if (cells.length < 2) continue;
 
-                    const rowLabel = cells[0].innerText.trim();
+                    const rawDay = cells[0].innerText.trim();
+                    const shortDay = dayMap[rawDay.toLowerCase()] || rawDay;
                     let lessons = [];
 
                     for (let j = 1; j < cells.length; j++) {
-                        const rawContent = cells[j].innerText.trim();
-                        // Ignore empty slots or aSc's non-breaking space artifacts
-                        if (rawContent && rawContent !== '&nbsp;') {
-                            lessons.push({
-                                time: headerCells[j] || `${j}. tund`,
-                                content: rawContent
-                            });
+                        const td = cells[j];
+                        if (td.innerText.trim() && td.innerText.trim() !== '&nbsp;') {
+                            let parsedData = parseLessonCell(td);
+                            if (parsedData) {
+                                lessons.push({
+                                    period: headerCells[j] || `${j}`,
+                                    data: parsedData
+                                });
+                            }
                         }
                     }
 
                     if (lessons.length > 0) {
-                        scheduleData.push({ day: rowLabel, lessons });
+                        scheduleData.push({ day: shortDay, lessons });
                     }
                 }
 
-                if (scheduleData.length === 0) {
-                    throw new Error("Tabel leiti, aga see on tühi.");
-                }
+                if (scheduleData.length === 0) throw new Error("Tabel leiti, aga see on tühi.");
 
                 renderSchedule(scheduleData);
             } catch (error) {
-                container.innerHTML = `<div class="error-box">
-                    <strong>Viga andmete laadimisel:</strong><br>${error.message}
-                </div>`;
+                container.innerHTML = `<div class="error-box"><strong>Viga andmete laadimisel:</strong><br>${error.message}</div>`;
                 console.error(error);
             }
         }
@@ -107,17 +151,24 @@
                 card.className = 'day-card';
                 
                 let lessonsHtml = day.lessons.map(l => {
-                    // Split aSc's multiline cell into Subject and Room/Teacher
-                    const parts = l.content.split('\n').filter(p => p.trim() !== '');
-                    const subject = parts[0] || '';
-                    const details = parts.slice(1).join(' • ');
+                    let topText = `${l.data.time} ${l.data.subject}`.trim();
+                    
+                    let columnsHtml = `<div class="lesson-groups">`;
+                    l.data.groups.forEach(g => {
+                         columnsHtml += `<div class="group-col">` + g.map(line => `<div>${line}</div>`).join('') + `</div>`;
+                    });
+                    columnsHtml += `</div>`;
+
+                    // Ensure period number ends with a dot
+                    let periodNum = l.period;
+                    if (!periodNum.endsWith('.')) periodNum += '.';
 
                     return `
                         <div class="lesson">
-                            <div class="lesson-time">${l.time}</div>
-                            <div class="lesson-details">
-                                <span class="subject">${subject}</span>
-                                ${details ? `<span class="meta">${details}</span>` : ''}
+                            <div class="lesson-number">${periodNum}</div>
+                            <div class="lesson-content">
+                                <div class="lesson-top">${topText}</div>
+                                ${columnsHtml}
                             </div>
                         </div>
                     `;
@@ -128,14 +179,10 @@
             });
         }
 
-        // Initialize fetch
         fetchAndParse();
 
-        // Register Service Worker for PWA capability
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').catch(err => {
-                console.warn("Service worker registration failed:", err);
-            });
+            navigator.serviceWorker.register('sw.js').catch(() => {});
         }
     </script>
 </body>
